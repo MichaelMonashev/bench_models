@@ -105,23 +105,29 @@ def _main():
     print("Benchmark batches", BENCHMARK_BATCHES)
     print("GPU name:", torch.cuda.get_device_name(0),"\n")
 
-    print("Source   Model name                     Top1  Float32 Float32 Float16")
-    print("                                              no TF32           (AMP)")
+    print("Source   Model name                     Top1                          | torch.jit.script(model) | torch.jit.trace(model)")
+    print("                                              Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16")
+    print("                                              no TF32           (AMP) | no TF32           (AMP) | no TF32           (AMP)")
 
     prefix = "timm"
     for model_name, acc in MODEL_NAMES.items():
         with torch.no_grad():
             model = timm.create_model(model_name, pretrained=True)
 
-            model = torch.jit.script(model)
-
             model = model.cuda()
             model.eval()
 
             images_per_second, images_per_second_no_tf32, images_per_second_amp = bench_precision(model, images)
 
+            jit_scripted_model = torch.jit.script(model)
+            jit_scripted_images_per_second, jit_scripted_images_per_second_no_tf32, jit_scripted_images_per_second_amp = bench_precision(jit_scripted_model, images)
+
+            jit_traced_model = torch.jit.trace(model, (images,))
+            jit_traced_images_per_second, jit_traced_images_per_second_no_tf32, jit_traced_images_per_second_amp = bench_precision(jit_traced_model, images)
+
             del model
-            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} img/s")
+
+            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} | {jit_scripted_images_per_second_no_tf32:7d} {jit_scripted_images_per_second:7d} {jit_scripted_images_per_second_amp:7d} | {jit_traced_images_per_second_no_tf32:7d} {jit_traced_images_per_second:7d} {jit_traced_images_per_second_amp:7d} img/s")
 
 if __name__ == '__main__':
     _main()
