@@ -1,6 +1,5 @@
 import torch
 import timm
-import time
 import gc
 
 torch.backends.cudnn.benchmark = True
@@ -91,12 +90,18 @@ for model_name, acc in model_names.items():
 
         # bencmark
         torch.cuda.synchronize()
-        start = time.perf_counter()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+
         for i in range(BENCHMARK_BATCHES):
             model(images)
-        torch.cuda.synchronize()
-        end = time.perf_counter()
-        images_per_second = round(BENCHMARK_BATCHES * BATCH_SIZE / (end-start))
+
+        end_event.record()
+        torch.cuda.synchronize()  # Wait for the events to be recorded!
+        elapsed_time_ms = start_event.elapsed_time(end_event)
+
+        images_per_second = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
 
 
         # Automatic Mixed Precision
@@ -108,12 +113,18 @@ for model_name, acc in model_names.items():
 
             # bencmark
             torch.cuda.synchronize()
-            start = time.perf_counter()
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            start_event.record()
+
             for i in range(BENCHMARK_BATCHES):
                 model(images)
-            torch.cuda.synchronize()
-            end = time.perf_counter()
-            images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / (end-start))
+
+            end_event.record()
+            torch.cuda.synchronize()  # Wait for the events to be recorded!
+            elapsed_time_ms = start_event.elapsed_time(end_event)
+
+            images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
 
         del model
         print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second:5d} {images_per_second_amp:5d} img/s")
