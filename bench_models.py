@@ -47,6 +47,7 @@ MODEL_NAMES = {
 }
 
 def bench(model, images):
+    gc.collect()
     torch.cuda.empty_cache()
 
     # warming up
@@ -70,8 +71,25 @@ def bench(model, images):
 
     return images_per_second
 
+def bench_precision(model, images):
+
+    # float32
+    images_per_second = bench(model, images)
+
+    # disable TensorFloat-32(TF32) on Ampere devices or newer
+    torch.backends.cuda.matmul.allow_tf32 = False
+    images_per_second_no_tf32 = bench(model, images)
+    torch.backends.cuda.matmul.allow_tf32 = True # revert to defaults
+
+    # Automatic Mixed Precision
+    with torch.cuda.amp.autocast():
+        images_per_second_amp = bench(model, images)
+
+    return images_per_second, images_per_second_no_tf32, images_per_second_amp
+
 def _main():
     torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     images = torch.rand(BATCH_SIZE, 3, 332, 332)
     images = images.cuda()
@@ -87,31 +105,23 @@ def _main():
     print("Benchmark batches", BENCHMARK_BATCHES)
     print("GPU name:", torch.cuda.get_device_name(0),"\n")
 
-    print(f"Source   Model name                     Top1 Float32 Float16(AMP)")
+    print("Source   Model name                     Top1  Float32 Float32 Float16")
+    print("                                              no TF32           (AMP)")
 
     prefix = "timm"
     for model_name, acc in MODEL_NAMES.items():
-        gc.collect()
-        torch.cuda.empty_cache()
-
         with torch.no_grad():
             model = timm.create_model(model_name, pretrained=True)
 
             model = torch.jit.script(model)
 
             model = model.cuda()
-
             model.eval()
 
-            # float32
-            images_per_second = bench(model, images)
-
-            # Automatic Mixed Precision
-            with torch.cuda.amp.autocast():
-                images_per_second_amp = bench(model, images)
+            images_per_second, images_per_second_no_tf32, images_per_second_amp = bench_precision(model, images)
 
             del model
-            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second:5d} {images_per_second_amp:5d} img/s")
+            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} img/s")
 
 if __name__ == '__main__':
     _main()
