@@ -2,18 +2,11 @@ import torch
 import timm
 import gc
 
-torch.backends.cudnn.benchmark = True
-
 BATCH_SIZE = 64
-
 WARMING_UP_BATCHES = 50
 BENCHMARK_BATCHES = 100
 
-images = torch.rand(BATCH_SIZE, 3, 332, 332)
-images = images.cuda()
-images_half = images.half()
-
-model_names = {
+MODEL_NAMES = {
     'resnet18': 73.3,
     'resnet34': 75.1,
     'resnet50': 79.0,
@@ -53,78 +46,72 @@ model_names = {
     'gernet_l': 81.3,
 }
 
-# fetch model weights
-print("Downloading model weights...")
-for model_name, _ in model_names.items():
-    model = timm.create_model(model_name, pretrained=True)
-
-del model
-
-print("Batch size", images.size())
-print("Warming up batches", WARMING_UP_BATCHES)
-print("Benchmark batches", BENCHMARK_BATCHES)
-print("GPU name:", torch.cuda.get_device_name(0),"\n")
-print("\n")
-
-print(f"Source   Model name                     Top1 Float32 Float16(AMP)")
-
-prefix = "timm"
-for model_name, acc in model_names.items():
-    gc.collect()
+def bench(model, images):
     torch.cuda.empty_cache()
 
-    with torch.no_grad():
+    # warming up
+    for i in range(WARMING_UP_BATCHES):
+        model(images)
+
+    # bencmark
+    torch.cuda.synchronize()
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+
+    for i in range(BENCHMARK_BATCHES):
+        model(images)
+
+    end_event.record()
+    torch.cuda.synchronize()  # Wait for the events to be recorded!
+    elapsed_time_ms = start_event.elapsed_time(end_event)
+
+    images_per_second = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+
+    return images_per_second
+
+def _main():
+    torch.backends.cudnn.benchmark = True
+
+    images = torch.rand(BATCH_SIZE, 3, 332, 332)
+    images = images.cuda()
+
+    # fetch model weights
+    print("Downloading model weights...")
+    for model_name, _ in MODEL_NAMES.items():
         model = timm.create_model(model_name, pretrained=True)
+    del model
 
-        model = torch.jit.script(model)
+    print("Batch size", images.size())
+    print("Warming up batches", WARMING_UP_BATCHES)
+    print("Benchmark batches", BENCHMARK_BATCHES)
+    print("GPU name:", torch.cuda.get_device_name(0),"\n")
 
-        model = model.cuda()
+    print(f"Source   Model name                     Top1 Float32 Float16(AMP)")
 
-        model.eval()
-
-        # float32
+    prefix = "timm"
+    for model_name, acc in MODEL_NAMES.items():
+        gc.collect()
         torch.cuda.empty_cache()
-        # warming up
-        for i in range(WARMING_UP_BATCHES):
-            model(images)
 
-        # bencmark
-        torch.cuda.synchronize()
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
+        with torch.no_grad():
+            model = timm.create_model(model_name, pretrained=True)
 
-        for i in range(BENCHMARK_BATCHES):
-            model(images)
+            model = torch.jit.script(model)
 
-        end_event.record()
-        torch.cuda.synchronize()  # Wait for the events to be recorded!
-        elapsed_time_ms = start_event.elapsed_time(end_event)
+            model = model.cuda()
 
-        images_per_second = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+            model.eval()
 
+            # float32
+            images_per_second = bench(model, images)
 
-        # Automatic Mixed Precision
-        torch.cuda.empty_cache()
-        with torch.cuda.amp.autocast():
-            # warming up
-            for i in range(WARMING_UP_BATCHES):
-                model(images)
+            # Automatic Mixed Precision
+            with torch.cuda.amp.autocast():
+                images_per_second_amp = bench(model, images)
 
-            # bencmark
-            torch.cuda.synchronize()
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
+            del model
+            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second:5d} {images_per_second_amp:5d} img/s")
 
-            for i in range(BENCHMARK_BATCHES):
-                model(images)
-
-            end_event.record()
-            torch.cuda.synchronize()  # Wait for the events to be recorded!
-            elapsed_time_ms = start_event.elapsed_time(end_event)
-
-            images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
-
-        del model
-        print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second:5d} {images_per_second_amp:5d} img/s")
+if __name__ == '__main__':
+    _main()
