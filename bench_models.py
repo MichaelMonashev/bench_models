@@ -122,10 +122,11 @@ def _main():
 
             jit_scripted_model = torch.jit.script(model)
             jit_scripted_images_per_second, jit_scripted_images_per_second_no_tf32, jit_scripted_images_per_second_amp = bench_precision(jit_scripted_model, images)
+            del jit_scripted_model
 
             jit_traced_model = torch.jit.trace(model, (images,))
             jit_traced_images_per_second, jit_traced_images_per_second_no_tf32, jit_traced_images_per_second_amp = bench_precision(jit_traced_model, images)
-
+            del jit_traced_model
 
             # CUDA Graph
             g = torch.cuda.CUDAGraph()
@@ -251,7 +252,7 @@ def _main():
 
             graphed_images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
 
-            del g
+            del g, s, y
             del model
 
             print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} | {jit_scripted_images_per_second_no_tf32:7d} {jit_scripted_images_per_second:7d} {jit_scripted_images_per_second_amp:7d} | {jit_traced_images_per_second_no_tf32:7d} {jit_traced_images_per_second:7d} {jit_traced_images_per_second_amp:7d} | {graphed_images_per_second_no_tf32:7d} {graphed_images_per_second:7d} {graphed_images_per_second_amp:7d} img/s")
