@@ -1,8 +1,13 @@
 import torch
 import timm
 import gc
+import time
 
 BATCH_SIZE = 64
+
+IO_WARMING_UP_BATCHES = 50
+IO_BENCHMARK_BATCHES = 100
+
 WARMING_UP_BATCHES = 50
 BENCHMARK_BATCHES = 100
 
@@ -87,23 +92,115 @@ def bench_precision(model, images):
 
     return images_per_second, images_per_second_no_tf32, images_per_second_amp
 
+def bench_io_(images, from_device, to_device, pin, non_blocking):
+    torch.cuda.synchronize()
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    batches = []
+    sended_bytes = 0
+    while sended_bytes < 500*1024*1024:
+        batch = torch.randn_like(images, device=from_device)
+        sended_bytes += batch.element_size() * batch.nelement()
+        if pin:
+            batch = batch.pin_memory()
+        batches.append(batch)
+        break
+
+    start = time.perf_counter()
+
+    for batch in batches:
+        batch = batch.to(device=to_device, non_blocking=non_blocking)
+    torch.cuda.synchronize()
+
+    end = time.perf_counter()
+
+    del batches, batch
+
+    elapsed_time = end-start
+
+    return elapsed_time, sended_bytes
+
+def bench_io(images, from_device, to_device, pin, non_blocking):
+    # warming up
+    for _ in range(IO_WARMING_UP_BATCHES):
+        bench_io_(images, from_device, to_device, pin, non_blocking)
+
+    # bencmark
+    total_elapsed_time = 0
+    total_sended_bytes = 0
+    for _ in range(IO_BENCHMARK_BATCHES):
+        elapsed_time, sended_bytes = bench_io_(images, from_device, to_device, pin, non_blocking)
+        total_elapsed_time += elapsed_time
+        total_sended_bytes += sended_bytes
+
+    megabytes_per_second = round(total_sended_bytes / total_elapsed_time / 1024 / 1024)
+
+    return megabytes_per_second
+
 def _main():
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
+    print("GPU name:", torch.cuda.get_device_name(0), " " , round(torch.cuda.get_device_properties(0).total_memory / 1000 ** 3), "Gb")
+    print("Torch version:", torch.__version__,)
+    print("CUDA version:", torch.version.cuda,"\n")
+
+    print("Sending data to GPU benchmark.")
+    print("Warming up batches", IO_WARMING_UP_BATCHES)
+    print("Benchmark batches", IO_BENCHMARK_BATCHES, "\n")
+
+    print("                                       Pinned                Not pinned")
+    print("Batch size                       Blocked Not blocked     Blocked Not blocked")
+    # send tensor to GPU benchmark
+    from_device = torch.device('cpu')
+    to_device = torch.device('cuda:0')
+    for tensor_size in [32,64,128,256,512,1024]:
+
+        images = torch.empty(BATCH_SIZE, 3, tensor_size, tensor_size, dtype=torch.float)
+
+        megabytes_per_second_pinned_not_blocking = bench_io(images, from_device, to_device, pin=True, non_blocking=True)
+        megabytes_per_second_pinned_blocking = bench_io(images, from_device, to_device, pin=True, non_blocking=False)
+        megabytes_per_second_not_pinned_not_blocking = bench_io(images, from_device, to_device, pin=False, non_blocking=True)
+        megabytes_per_second_not_pinned_blocking = bench_io(images, from_device, to_device, pin=False, non_blocking=False)
+
+        print(f"{str(images.size()):32} {megabytes_per_second_pinned_blocking:7d} {megabytes_per_second_pinned_not_blocking:11d} {megabytes_per_second_not_pinned_blocking:11d} {megabytes_per_second_not_pinned_not_blocking:11d} MB/s")
+
+    print("\n\nGetting data from GPU benchmark.")
+    print("Warming up batches", IO_WARMING_UP_BATCHES)
+    print("Benchmark batches", IO_BENCHMARK_BATCHES, "\n")
+
+    print("Batch size               Blocked   Not blocked")
+    # send tensor to GPU benchmark
+    from_device = torch.device('cuda:0')
+    to_device = torch.device('cpu')
+    for tensor_size in [32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536]:
+
+        preds = torch.empty(BATCH_SIZE, tensor_size, dtype=torch.float)
+
+        megabytes_per_second_not_blocking = bench_io(preds, from_device, to_device, pin=False, non_blocking=True)
+        megabytes_per_second_blocking = bench_io(preds, from_device, to_device, pin=False, non_blocking=False)
+
+        print(f"{str(preds.size()):24} {megabytes_per_second_blocking:7d} {megabytes_per_second_not_blocking:8d} MB/s")
+
+
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # models benchmark
     images = torch.rand(BATCH_SIZE, 3, 332, 332)
     images = images.cuda()
 
     # fetch model weights
-    print("Downloading model weights...")
+    print("\n\nDownloading model weights...")
     for model_name, _ in MODEL_NAMES.items():
         model = timm.create_model(model_name, pretrained=True)
     del model
 
+    print("GPU inference benchmark (forward pass speed).")
     print("Batch size", images.size())
     print("Warming up batches", WARMING_UP_BATCHES)
-    print("Benchmark batches", BENCHMARK_BATCHES)
-    print("GPU name:", torch.cuda.get_device_name(0),"\n")
+    print("Benchmark batches", BENCHMARK_BATCHES, "\n")
 
     print("Source   Model name                     Top1                          | torch.jit.script(model) | torch.jit.trace(model)  | with torch.cuda.graph()")
     print("                                              Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16")
