@@ -156,7 +156,7 @@ def _main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    print("GPU name:", torch.cuda.get_device_name(0), " " , round(torch.cuda.get_device_properties(0).total_memory / 1000 ** 3), "Gb")
+    print("GPU name:", torch.cuda.get_device_name(0), " " , round(torch.cuda.get_device_properties(0).total_memory / 1024 ** 3), "Gb")
     print("Torch version:", torch.__version__,)
     print("CUDA version:", torch.version.cuda,"\n")
 
