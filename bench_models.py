@@ -94,8 +94,10 @@ def bench_precision(model, images):
 
     # disable TensorFloat-32(TF32) on Ampere devices or newer
     torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     images_per_second_no_tf32 = bench(model, images)
     torch.backends.cuda.matmul.allow_tf32 = True # revert to defaults
+    torch.backends.cudnn.allow_tf32 = True
 
     # Automatic Mixed Precision
     with torch.cuda.amp.autocast():
@@ -152,6 +154,7 @@ def bench_io(images, from_device, to_device, pin, non_blocking):
 def _main():
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     print("GPU name:", torch.cuda.get_device_name(0), " " , round(torch.cuda.get_device_properties(0).total_memory / 1000 ** 3), "Gb")
     print("Torch version:", torch.__version__,)
@@ -279,6 +282,7 @@ def _main():
 
             # disable TensorFloat-32(TF32) on Ampere devices or newer
             torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
             # CUDA Graph
             g = torch.cuda.CUDAGraph()
 
@@ -317,6 +321,7 @@ def _main():
 
             graphed_images_per_second_no_tf32 = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
             torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
 
 
             # AMP
