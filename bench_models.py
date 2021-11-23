@@ -49,6 +49,17 @@ MODEL_NAMES = {
     'gernet_s': 75.7,
     'gernet_m': 80.0,
     'gernet_l': 81.3,
+
+    # transformers
+    #'levit_128s': 76.5,
+    #'levit_128': 78.5,
+    #'levit_192': 79.9,
+    #'levit_256': 81.5,
+    #'levit_384': 82.6,
+    #'vit_base_patch16_224': 84.5,
+    #'beit_base_patch16_224': 85.2,
+    #'beit_large_patch16_224': 87.5,
+    #'beit_large_patch16_512': 88.6,
 }
 
 def bench(model, images):
