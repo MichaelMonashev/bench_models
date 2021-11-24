@@ -1,7 +1,12 @@
-import torch
-import timm
 import gc
 import time
+import subprocess
+import platform
+import lsb_release
+
+import torch
+import timm
+import cpuinfo # installation: python -m pip install -U py-cpuinfo
 
 BATCH_SIZE = 64
 
@@ -156,9 +161,23 @@ def _main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    print("GPU name:", torch.cuda.get_device_name(0), " " , round(torch.cuda.get_device_properties(0).total_memory / 1024 ** 3), "Gb")
+    print("CPU:", cpuinfo.get_cpu_info()['brand_raw'], "cores:",  cpuinfo.get_cpu_info()['count'], "\n")
+
+    print("Motherboard vendor:", subprocess.check_output(['cat', '/sys/devices/virtual/dmi/id/board_vendor'],encoding='utf-8').strip())
+    print("Motherboard model name:", subprocess.check_output(['cat', '/sys/devices/virtual/dmi/id/board_name'],encoding='utf-8').strip(), " version:", subprocess.check_output(['cat', '/sys/devices/virtual/dmi/id/board_version'],encoding='utf-8').strip(), "\n")
+
+    print("GPU:", subprocess.check_output(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), " " , subprocess.check_output(['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader'],encoding='utf-8').strip())
+    print("GPU driver version:", subprocess.check_output(['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader,nounits'],encoding='utf-8').strip())
+    print("PCI-E: ", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.gen.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "@", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.width.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "x\n", sep='')
+
+    print("OS:",lsb_release.get_distro_information()['DESCRIPTION'],"\n")
+
+    print("Python version:", platform.python_version())
+
     print("Torch version:", torch.__version__,)
-    print("CUDA version:", torch.version.cuda,"\n")
+    print("Torch GPU name:", torch.cuda.get_device_name(0))
+    print("Torch available memory:", round(torch.cuda.get_device_properties(0).total_memory / 1024 ** 3), "Gb")
+    print("Torch CUDA version:", torch.version.cuda,"\n")
 
     print("Sending data to GPU benchmark.")
     print("Warming up batches", IO_WARMING_UP_BATCHES)
