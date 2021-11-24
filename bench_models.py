@@ -237,7 +237,7 @@ def _main():
 
     print("Source   Model name                     Top1                          | torch.jit.script(model) | torch.jit.trace(model)  | with torch.cuda.graph()")
     print("                                              Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16")
-    print("                                              no TF32           (AMP) | no TF32           (AMP) | no TF32           (AMP) | no TF32           (AMP)")
+    print("                                                       + TF32   (AMP) |          + TF32   (AMP) |          + TF32   (AMP) |          + TF32   (AMP)")
 
 
     prefix = "timm"
