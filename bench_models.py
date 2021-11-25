@@ -258,192 +258,201 @@ def _main():
             model = model.cuda()
             model.eval()
 
-            images_per_second, images_per_second_no_tf32, images_per_second_amp, images_per_second_bfloat16 = bench_precision(model, images)
+            for memory_format in [torch.contiguous_format, torch.channels_last]:
 
-            jit_scripted_model = torch.jit.script(model)
-            jit_scripted_images_per_second, jit_scripted_images_per_second_no_tf32, jit_scripted_images_per_second_amp, jit_scripted_images_per_second_bfloat16 = bench_precision(jit_scripted_model, images)
-            del jit_scripted_model
+                model.to(memory_format=memory_format)
+                images.to(memory_format=memory_format)
 
-            jit_traced_model = torch.jit.trace(model, (images,))
-            jit_traced_images_per_second, jit_traced_images_per_second_no_tf32, jit_traced_images_per_second_amp, jit_traced_images_per_second_bfloat16 = bench_precision(jit_traced_model, images)
-            del jit_traced_model
+                images_per_second, images_per_second_no_tf32, images_per_second_amp, images_per_second_bfloat16 = bench_precision(model, images)
 
-            # CUDA Graph
-            g = torch.cuda.CUDAGraph()
+                jit_scripted_model = torch.jit.script(model)
+                jit_scripted_images_per_second, jit_scripted_images_per_second_no_tf32, jit_scripted_images_per_second_amp, jit_scripted_images_per_second_bfloat16 = bench_precision(jit_scripted_model, images)
+                del jit_scripted_model
 
-            # Warmup before capture
-            s = torch.cuda.Stream()
-            s.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s):
-                for _ in range(3):
+                jit_traced_model = torch.jit.trace(model, (images,))
+                jit_traced_images_per_second, jit_traced_images_per_second_no_tf32, jit_traced_images_per_second_amp, jit_traced_images_per_second_bfloat16 = bench_precision(jit_traced_model, images)
+                del jit_traced_model
+
+                # CUDA Graph
+                g = torch.cuda.CUDAGraph()
+
+                # Warmup before capture
+                s = torch.cuda.Stream()
+                s.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s):
+                    for _ in range(3):
+                        y = model(images)
+                torch.cuda.current_stream().wait_stream(s)
+
+                # Captures the graph
+                # To allow capture, automatically sets a side stream as the current stream in the context
+                with torch.cuda.graph(g):
                     y = model(images)
-            torch.cuda.current_stream().wait_stream(s)
 
-            # Captures the graph
-            # To allow capture, automatically sets a side stream as the current stream in the context
-            with torch.cuda.graph(g):
-                y = model(images)
+                gc.collect()
+                torch.cuda.empty_cache()
 
-            gc.collect()
-            torch.cuda.empty_cache()
+                # warming up
+                for i in range(WARMING_UP_BATCHES):
+                    g.replay()
 
-            # warming up
-            for i in range(WARMING_UP_BATCHES):
-                g.replay()
+                # bencmark
+                torch.cuda.synchronize()
+                start_event = torch.cuda.Event(enable_timing=True)
+                end_event = torch.cuda.Event(enable_timing=True)
+                start_event.record()
 
-            # bencmark
-            torch.cuda.synchronize()
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
+                for i in range(BENCHMARK_BATCHES):
+                    g.replay()
 
-            for i in range(BENCHMARK_BATCHES):
-                g.replay()
+                end_event.record()
+                torch.cuda.synchronize()  # Wait for the events to be recorded!
+                elapsed_time_ms = start_event.elapsed_time(end_event)
 
-            end_event.record()
-            torch.cuda.synchronize()  # Wait for the events to be recorded!
-            elapsed_time_ms = start_event.elapsed_time(end_event)
-
-            graphed_images_per_second = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+                graphed_images_per_second = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
 
 
 
 
-            # disable TensorFloat-32(TF32) on Ampere devices or newer
-            torch.backends.cuda.matmul.allow_tf32 = False
-            torch.backends.cudnn.allow_tf32 = False
-            # CUDA Graph
-            g = torch.cuda.CUDAGraph()
+                # disable TensorFloat-32(TF32) on Ampere devices or newer
+                torch.backends.cuda.matmul.allow_tf32 = False
+                torch.backends.cudnn.allow_tf32 = False
+                # CUDA Graph
+                g = torch.cuda.CUDAGraph()
 
-            # Warmup before capture
-            s = torch.cuda.Stream()
-            s.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s):
-                for _ in range(3):
+                # Warmup before capture
+                s = torch.cuda.Stream()
+                s.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s):
+                    for _ in range(3):
+                        y = model(images)
+                torch.cuda.current_stream().wait_stream(s)
+
+                # Captures the graph
+                # To allow capture, automatically sets a side stream as the current stream in the context
+                with torch.cuda.graph(g):
                     y = model(images)
-            torch.cuda.current_stream().wait_stream(s)
 
-            # Captures the graph
-            # To allow capture, automatically sets a side stream as the current stream in the context
-            with torch.cuda.graph(g):
-                y = model(images)
+                gc.collect()
+                torch.cuda.empty_cache()
 
-            gc.collect()
-            torch.cuda.empty_cache()
+                # warming up
+                for i in range(WARMING_UP_BATCHES):
+                    g.replay()
 
-            # warming up
-            for i in range(WARMING_UP_BATCHES):
-                g.replay()
+                # bencmark
+                torch.cuda.synchronize()
+                start_event = torch.cuda.Event(enable_timing=True)
+                end_event = torch.cuda.Event(enable_timing=True)
+                start_event.record()
 
-            # bencmark
-            torch.cuda.synchronize()
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
+                for i in range(BENCHMARK_BATCHES):
+                    g.replay()
 
-            for i in range(BENCHMARK_BATCHES):
-                g.replay()
+                end_event.record()
+                torch.cuda.synchronize()  # Wait for the events to be recorded!
+                elapsed_time_ms = start_event.elapsed_time(end_event)
 
-            end_event.record()
-            torch.cuda.synchronize()  # Wait for the events to be recorded!
-            elapsed_time_ms = start_event.elapsed_time(end_event)
-
-            graphed_images_per_second_no_tf32 = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
+                graphed_images_per_second_no_tf32 = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
 
 
-            # AMP
-            # CUDA Graph
-            g = torch.cuda.CUDAGraph()
+                # AMP
+                # CUDA Graph
+                g = torch.cuda.CUDAGraph()
 
-            # Warmup before capture
-            s = torch.cuda.Stream()
-            s.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s):
-                for _ in range(3):
+                # Warmup before capture
+                s = torch.cuda.Stream()
+                s.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s):
+                    for _ in range(3):
+                        with torch.cuda.amp.autocast():
+                            y = model(images)
+                torch.cuda.current_stream().wait_stream(s)
+
+                # Captures the graph
+                # To allow capture, automatically sets a side stream as the current stream in the context
+                with torch.cuda.graph(g):
                     with torch.cuda.amp.autocast():
                         y = model(images)
-            torch.cuda.current_stream().wait_stream(s)
 
-            # Captures the graph
-            # To allow capture, automatically sets a side stream as the current stream in the context
-            with torch.cuda.graph(g):
-                with torch.cuda.amp.autocast():
-                    y = model(images)
+                gc.collect()
+                torch.cuda.empty_cache()
 
-            gc.collect()
-            torch.cuda.empty_cache()
+                # warming up
+                for i in range(WARMING_UP_BATCHES):
+                    g.replay()
 
-            # warming up
-            for i in range(WARMING_UP_BATCHES):
-                g.replay()
+                # bencmark
+                torch.cuda.synchronize()
+                start_event = torch.cuda.Event(enable_timing=True)
+                end_event = torch.cuda.Event(enable_timing=True)
+                start_event.record()
 
-            # bencmark
-            torch.cuda.synchronize()
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
+                for i in range(BENCHMARK_BATCHES):
+                    g.replay()
 
-            for i in range(BENCHMARK_BATCHES):
-                g.replay()
+                end_event.record()
+                torch.cuda.synchronize()  # Wait for the events to be recorded!
+                elapsed_time_ms = start_event.elapsed_time(end_event)
 
-            end_event.record()
-            torch.cuda.synchronize()  # Wait for the events to be recorded!
-            elapsed_time_ms = start_event.elapsed_time(end_event)
-
-            graphed_images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+                graphed_images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
 
 
-#            # bfloat16
-#            model.bfloat16()
-#            images.bfloat16()
-#            # CUDA Graph
-#            g = torch.cuda.CUDAGraph()
-#
-#            # Warmup before capture
-#            s = torch.cuda.Stream()
-#            s.wait_stream(torch.cuda.current_stream())
-#            with torch.cuda.stream(s):
-#                for _ in range(3):
-#                    y = model(images)
-#            torch.cuda.current_stream().wait_stream(s)
-#
-#            # Captures the graph
-#            # To allow capture, automatically sets a side stream as the current stream in the context
-#            with torch.cuda.graph(g):
-#                y = model(images)
-#
-#            gc.collect()
-#            torch.cuda.empty_cache()
-#
-#            # warming up
-#            for i in range(WARMING_UP_BATCHES):
-#                g.replay()
-#
-#            # bencmark
-#            torch.cuda.synchronize()
-#            start_event = torch.cuda.Event(enable_timing=True)
-#            end_event = torch.cuda.Event(enable_timing=True)
-#            start_event.record()
-#
-#            for i in range(BENCHMARK_BATCHES):
-#                g.replay()
-#
-#            end_event.record()
-#            torch.cuda.synchronize()  # Wait for the events to be recorded!
-#            elapsed_time_ms = start_event.elapsed_time(end_event)
-#
-#            graphed_images_per_second_bfloat16 = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
-#
-#            # revert dtype
-#            model.float()
-#            images.float()
+    #            # bfloat16
+    #            model.bfloat16()
+    #            images.bfloat16()
+    #            # CUDA Graph
+    #            g = torch.cuda.CUDAGraph()
+    #
+    #            # Warmup before capture
+    #            s = torch.cuda.Stream()
+    #            s.wait_stream(torch.cuda.current_stream())
+    #            with torch.cuda.stream(s):
+    #                for _ in range(3):
+    #                    y = model(images)
+    #            torch.cuda.current_stream().wait_stream(s)
+    #
+    #            # Captures the graph
+    #            # To allow capture, automatically sets a side stream as the current stream in the context
+    #            with torch.cuda.graph(g):
+    #                y = model(images)
+    #
+    #            gc.collect()
+    #            torch.cuda.empty_cache()
+    #
+    #            # warming up
+    #            for i in range(WARMING_UP_BATCHES):
+    #                g.replay()
+    #
+    #            # bencmark
+    #            torch.cuda.synchronize()
+    #            start_event = torch.cuda.Event(enable_timing=True)
+    #            end_event = torch.cuda.Event(enable_timing=True)
+    #            start_event.record()
+    #
+    #            for i in range(BENCHMARK_BATCHES):
+    #                g.replay()
+    #
+    #            end_event.record()
+    #            torch.cuda.synchronize()  # Wait for the events to be recorded!
+    #            elapsed_time_ms = start_event.elapsed_time(end_event)
+    #
+    #            graphed_images_per_second_bfloat16 = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+    #
+    #            # revert dtype
+    #            model.float()
+    #            images.float()
+
+                printed_model_name = model_name
+                if memory_format == torch.channels_last:
+                    printed_model_name = "  channels last"
+
+                print(f"{prefix:8} {printed_model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} {images_per_second_bfloat16:8d} | {jit_scripted_images_per_second_no_tf32:7d} {jit_scripted_images_per_second:7d} {jit_scripted_images_per_second_amp:7d} {jit_scripted_images_per_second_bfloat16:8d} | {jit_traced_images_per_second_no_tf32:7d} {jit_traced_images_per_second:7d} {jit_traced_images_per_second_amp:7d} {jit_traced_images_per_second_bfloat16:8d} | {graphed_images_per_second_no_tf32:7d} {graphed_images_per_second:7d} {graphed_images_per_second_amp:7d} img/s")
 
             del g, s, y
             del model
-
-            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} {images_per_second_bfloat16:8d} | {jit_scripted_images_per_second_no_tf32:7d} {jit_scripted_images_per_second:7d} {jit_scripted_images_per_second_amp:7d} {jit_scripted_images_per_second_bfloat16:8d} | {jit_traced_images_per_second_no_tf32:7d} {jit_traced_images_per_second:7d} {jit_traced_images_per_second_amp:7d} {jit_traced_images_per_second_bfloat16:8d} | {graphed_images_per_second_no_tf32:7d} {graphed_images_per_second:7d} {graphed_images_per_second_amp:7d} img/s")
 
 if __name__ == '__main__':
     _main()
