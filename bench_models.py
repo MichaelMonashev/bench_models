@@ -1,4 +1,5 @@
 import gc
+import sys
 import time
 import subprocess
 import platform
@@ -248,6 +249,8 @@ def _main():
         try:
             model = timm.create_model(model_name, pretrained=True)
             del model
+        except KeyboardInterrupt:
+            sys.exit()
         except:
             print("couldn't create a model", model_name)
 
@@ -468,6 +471,8 @@ def _main():
 
                 del g, s, y
                 del model
+        except KeyboardInterrupt:
+            sys.exit()
         except:
             pass
 
