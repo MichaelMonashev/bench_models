@@ -133,13 +133,17 @@ def bench_io_(images, from_device, to_device, pin, non_blocking):
         if pin:
             batch = batch.pin_memory()
         batches.append(batch)
-        break
+        break # now usinng only first batch
 
     start = time.perf_counter()
 
-    for batch in batches:
-        batch = batch.to(device=to_device, non_blocking=non_blocking)
-    torch.cuda.synchronize()
+    if non_blocking:
+        for batch in batches:
+            batch = batch.to(device=to_device, non_blocking=True)
+        torch.cuda.synchronize()
+    else:
+        for batch in batches:
+            batch = batch.to(device=to_device, non_blocking=False)
 
     end = time.perf_counter()
 
