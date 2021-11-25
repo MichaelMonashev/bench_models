@@ -108,7 +108,13 @@ def bench_precision(model, images):
     with torch.cuda.amp.autocast():
         images_per_second_amp = bench(model, images)
 
-    return images_per_second, images_per_second_no_tf32, images_per_second_amp
+    images_per_second_bfloat16 = bench(model.to(dtype=torch.bfloat16), images.bfloat16())
+
+    # revert dtype
+    model.float()
+    images.float()
+
+    return images_per_second, images_per_second_no_tf32, images_per_second_amp, images_per_second_bfloat16
 
 def bench_io_(images, from_device, to_device, pin, non_blocking):
     torch.cuda.synchronize()
@@ -168,7 +174,7 @@ def _main():
 
     print("GPU:", subprocess.check_output(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), " " , subprocess.check_output(['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader'],encoding='utf-8').strip())
     print("GPU driver version:", subprocess.check_output(['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader,nounits'],encoding='utf-8').strip())
-    print("PCI-E: ", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.gen.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "@", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.width.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "x\n", sep='')
+    print("PCI-E max: ", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.gen.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "@", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.width.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "x\n", sep='')
 
     print("OS:",lsb_release.get_distro_information()['DESCRIPTION'],"\n")
 
@@ -224,6 +230,10 @@ def _main():
     images = torch.rand(BATCH_SIZE, 3, 332, 332)
     images = images.cuda()
 
+    # round weights
+    images.bfloat16()
+    images.float()
+
     # fetch model weights
     print("\n\nDownloading model weights...")
     for model_name, _ in MODEL_NAMES.items():
@@ -235,9 +245,9 @@ def _main():
     print("Warming up batches", WARMING_UP_BATCHES)
     print("Benchmark batches", BENCHMARK_BATCHES, "\n")
 
-    print("Source   Model name                     Top1                          | torch.jit.script(model) | torch.jit.trace(model)  | with torch.cuda.graph()")
-    print("                                              Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16 | Float32 Float32 Float16")
-    print("                                                       + TF32   (AMP) |          + TF32   (AMP) |          + TF32   (AMP) |          + TF32   (AMP)")
+    print("Source   Model name                     Top1                                   |     torch.jit.script(model)      |      torch.jit.trace(model)      | with torch.cuda.graph()")
+    print("                                              Float32 Float32 Float16 BFloat16 | Float32 Float32 Float16 BFloat16 | Float32 Float32 Float16 BFloat16 | Float32 Float32 Float16")
+    print("                                                       + TF32   (AMP)          |          + TF32   (AMP)          |          + TF32   (AMP)          |          + TF32   (AMP)")
 
 
     prefix = "timm"
@@ -248,14 +258,14 @@ def _main():
             model = model.cuda()
             model.eval()
 
-            images_per_second, images_per_second_no_tf32, images_per_second_amp = bench_precision(model, images)
+            images_per_second, images_per_second_no_tf32, images_per_second_amp, images_per_second_bfloat16 = bench_precision(model, images)
 
             jit_scripted_model = torch.jit.script(model)
-            jit_scripted_images_per_second, jit_scripted_images_per_second_no_tf32, jit_scripted_images_per_second_amp = bench_precision(jit_scripted_model, images)
+            jit_scripted_images_per_second, jit_scripted_images_per_second_no_tf32, jit_scripted_images_per_second_amp, jit_scripted_images_per_second_bfloat16 = bench_precision(jit_scripted_model, images)
             del jit_scripted_model
 
             jit_traced_model = torch.jit.trace(model, (images,))
-            jit_traced_images_per_second, jit_traced_images_per_second_no_tf32, jit_traced_images_per_second_amp = bench_precision(jit_traced_model, images)
+            jit_traced_images_per_second, jit_traced_images_per_second_no_tf32, jit_traced_images_per_second_amp, jit_traced_images_per_second_bfloat16 = bench_precision(jit_traced_model, images)
             del jit_traced_model
 
             # CUDA Graph
@@ -384,10 +394,56 @@ def _main():
 
             graphed_images_per_second_amp = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
 
+
+#            # bfloat16
+#            model.bfloat16()
+#            images.bfloat16()
+#            # CUDA Graph
+#            g = torch.cuda.CUDAGraph()
+#
+#            # Warmup before capture
+#            s = torch.cuda.Stream()
+#            s.wait_stream(torch.cuda.current_stream())
+#            with torch.cuda.stream(s):
+#                for _ in range(3):
+#                    y = model(images)
+#            torch.cuda.current_stream().wait_stream(s)
+#
+#            # Captures the graph
+#            # To allow capture, automatically sets a side stream as the current stream in the context
+#            with torch.cuda.graph(g):
+#                y = model(images)
+#
+#            gc.collect()
+#            torch.cuda.empty_cache()
+#
+#            # warming up
+#            for i in range(WARMING_UP_BATCHES):
+#                g.replay()
+#
+#            # bencmark
+#            torch.cuda.synchronize()
+#            start_event = torch.cuda.Event(enable_timing=True)
+#            end_event = torch.cuda.Event(enable_timing=True)
+#            start_event.record()
+#
+#            for i in range(BENCHMARK_BATCHES):
+#                g.replay()
+#
+#            end_event.record()
+#            torch.cuda.synchronize()  # Wait for the events to be recorded!
+#            elapsed_time_ms = start_event.elapsed_time(end_event)
+#
+#            graphed_images_per_second_bfloat16 = round(BENCHMARK_BATCHES * BATCH_SIZE / elapsed_time_ms*1000)
+#
+#            # revert dtype
+#            model.float()
+#            images.float()
+
             del g, s, y
             del model
 
-            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} | {jit_scripted_images_per_second_no_tf32:7d} {jit_scripted_images_per_second:7d} {jit_scripted_images_per_second_amp:7d} | {jit_traced_images_per_second_no_tf32:7d} {jit_traced_images_per_second:7d} {jit_traced_images_per_second_amp:7d} | {graphed_images_per_second_no_tf32:7d} {graphed_images_per_second:7d} {graphed_images_per_second_amp:7d} img/s")
+            print(f"{prefix:8} {model_name:30} {acc:2.1f}% {images_per_second_no_tf32:7d} {images_per_second:7d} {images_per_second_amp:7d} {images_per_second_bfloat16:8d} | {jit_scripted_images_per_second_no_tf32:7d} {jit_scripted_images_per_second:7d} {jit_scripted_images_per_second_amp:7d} {jit_scripted_images_per_second_bfloat16:8d} | {jit_traced_images_per_second_no_tf32:7d} {jit_traced_images_per_second:7d} {jit_traced_images_per_second_amp:7d} {jit_traced_images_per_second_bfloat16:8d} | {graphed_images_per_second_no_tf32:7d} {graphed_images_per_second:7d} {graphed_images_per_second_amp:7d} img/s")
 
 if __name__ == '__main__':
     _main()
