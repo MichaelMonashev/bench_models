@@ -3,11 +3,11 @@ import sys
 import time
 import subprocess
 import platform
-import distro
 
 import torch
 import timm
 import cpuinfo # installation: python -m pip install -U py-cpuinfo
+import distro
 
 BATCH_SIZE = 64
 IMAGE_SIZE = 332
