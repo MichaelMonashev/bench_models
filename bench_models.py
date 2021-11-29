@@ -3,7 +3,7 @@ import sys
 import time
 import subprocess
 import platform
-import lsb_release
+import distro
 
 import torch
 import timm
@@ -185,7 +185,8 @@ def _main():
     print("GPU driver version:", subprocess.check_output(['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader,nounits'],encoding='utf-8').strip())
     print("PCI-E max: ", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.gen.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "@", subprocess.check_output(['nvidia-smi', '--query-gpu=pcie.link.width.max', '--format=csv,noheader,nounits'],encoding='utf-8').strip(), "x\n", sep='')
 
-    print("OS:",lsb_release.get_distro_information()['DESCRIPTION'],"\n")
+    print("OS:", distro.name(), distro.version(), distro.codename())
+    print(platform.platform(),"\n")
 
     print("Python version:", platform.python_version())
 
