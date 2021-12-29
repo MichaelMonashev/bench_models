@@ -9,6 +9,8 @@ import timm
 import cpuinfo # installation: python -m pip install -U py-cpuinfo
 import distro
 
+# ToDo: find usefull environment info here: https://github.com/pytorch/pytorch/blob/master/torch/utils/collect_env.py
+
 BATCH_SIZE = 64
 IMAGE_SIZE = 332
 
