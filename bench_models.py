@@ -58,6 +58,11 @@ MODEL_NAMES = {
     'gernet_s': 75.7,
     'gernet_m': 80.0,
     'gernet_l': 81.3,
+    'tinynet_a': 77.65,
+    'tinynet_b': 74.98,
+    'tinynet_c': 71.23,
+    'tinynet_d': 66.96,
+    'tinynet_e': 59.86,
 
     # transformers
     'levit_128s': 76.5,
