@@ -14,11 +14,11 @@ import distro
 BATCH_SIZE = 64
 IMAGE_SIZE = 332
 
-IO_WARMING_UP_BATCHES = 50
-IO_BENCHMARK_BATCHES = 100
+IO_WARMING_UP_BATCHES = 3
+IO_BENCHMARK_BATCHES = 5
 
-WARMING_UP_BATCHES = 50
-BENCHMARK_BATCHES = 100
+WARMING_UP_BATCHES = 3
+BENCHMARK_BATCHES = 5
 
 MODEL_NAMES = {
     'resnet18': 73.3,
@@ -270,7 +270,8 @@ def _main():
     prefix = "timm"
     for model_name, acc in MODEL_NAMES.items():
         try:
-            with torch.no_grad():
+            #with torch.no_grad():
+            with torch.inference_mode():                
                 try:
                     model = timm.create_model(model_name, img_size=IMAGE_SIZE, pretrained=True)
                 except:
